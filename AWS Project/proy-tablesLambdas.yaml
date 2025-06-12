@@ -1,0 +1,343 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Pipeline Template: A template designed to define the data pipeline.
+
+# This template creates:
+#   2 Dynamo Tables
+#   1 S3 Bucket
+#   1 SNS Topic
+#   1 Email subscription
+#   3 Lambda Functions
+#   2 Event Source (As lambdas triggers)
+
+######################
+# Resources section
+######################
+
+
+
+
+Resources:
+
+  ## Dynamo Tables
+  DynamoDBTable1:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: proy-Datos
+      AttributeDefinitions:
+        - AttributeName: YearMonth
+          AttributeType: S
+        - AttributeName: Day
+          AttributeType: S
+      KeySchema:
+        - AttributeName: YearMonth
+          KeyType: HASH
+        - AttributeName: Day
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 10
+        WriteCapacityUnits: 10
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE   #Añado esto para permitir que sea el trigger de las lambdas 2 y 3
+
+  DynamoDBTable2:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: proy-Resultados
+      AttributeDefinitions:
+        - AttributeName: YearMonth
+          AttributeType: S
+      KeySchema:
+        - AttributeName: YearMonth
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 10
+        WriteCapacityUnits: 10
+
+  ## S3 Bucket: Dejo un ejemplo de código que podría usarse para crear una notificación de s3, que nos hubiera permitido agregarlo como desencadenador de la función lambda1.
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: proydatabucket
+      # NotificationConfiguration:
+      #   LambdaConfigurations:
+      #     - Event: s3:ObjectCreated:*
+      #       Function: !GetAtt Lambda1Function.Arn
+
+      # S3BucketPermission:
+      #   Type: AWS::Lambda::Permission
+      #   Properties:
+      #     FunctionName: !Ref Lambda1Function
+      #     Action: "lambda:InvokeFunction"
+      #     Principal: "s3.amazonaws.com"
+      #     SourceArn: !GetAtt S3Bucket.Arn
+
+      # LambdaIAMRole:
+      #   Type: 'AWS::IAM::Role'
+      #   Properties:
+      #     AssumeRolePolicyDocument:
+      #       Version: '2012-10-17'
+      #       Statement:
+      #         - Effect: Allow
+      #           Principal:
+      #             Service:
+      #               - lambda.amazonaws.com
+      #           Action: 'sts:AssumeRole'
+      #     Path: /
+      #     Policies:
+      #       - PolicyName: root
+      #         PolicyDocument:
+      #           Version: '2012-10-17'
+      #           Statement:
+      #             - Effect: Allow
+      #               Action:
+      #                 - 's3:GetBucketNotification'
+      #                 - 's3:PutBucketNotification'
+      #               Resource: !GetAtt S3Bucket.Arn
+      #             - Effect: Allow
+      #               Action:
+      #                 - 'logs:CreateLogGroup'
+      #                 - 'logs:CreateLogStream'
+      #                 - 'logs:PutLogEvents'
+      #               Resource: 'arn:aws:logs:::*'
+
+
+
+  ## Notification Service
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: DeviationExceeded
+
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref SNSTopic
+      Protocol: email
+      Endpoint: jlabellan@um.es #Importante poner el correo que corresponda
+
+  ## Lambda Functions
+
+  Lambda1Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lambda1
+      Handler: index.lambda_handler                                                                                                                                                                     #Ojo este campo es para indicar el nombre del archivo y el nombre de la función. Al estar el código en el propio archivo yaml. debemos poner como nombre del documento index. 
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole 
+      Code:
+        ZipFile: |
+          import json, urllib, boto3, csv
+          import datetime
+          from decimal import Decimal
+          TABLE_NAME = 'proy-Datos'
+          BUCKET_NAME =  'proydatabucket'
+          s3 = boto3.resource('s3')
+          dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+          table = dynamodb.Table(TABLE_NAME)
+          def lambda_handler(event, context):
+            bucket = BUCKET_NAME
+            key = urllib.parse.unquote_plus(event['Records'][0]['s3']['object']['key'])
+            localFilename = '/tmp/Temperaturas.csv'
+            try:
+              s3.meta.client.download_file(bucket, key, localFilename)
+            except Exception as e:
+              print('Error getting object {} from bucket {}. Make sure they exist and your bucket is in the same region as this function.'.format(key, bucket))
+              raise e
+            with open(localFilename) as csvfile:
+              reader = csv.DictReader(csvfile, delimiter=',')
+              items = {}
+              for row in reader:
+                try:
+                  fecha = str(datetime.datetime.strptime(row['Fecha'],'%Y/%m/%d').date()).split('-')
+                  year_month = '-'.join(fecha[:2])
+                  day = fecha[2]
+                  items[(year_month, day)] = {
+                        'YearMonth': year_month,
+                        'Day': day,
+                        'Medias':   float(row['Medias']),
+                        'Desviaciones':  float(row['Desviaciones'])
+                        }
+                except Exception as e:
+                  print(e)
+                  print("Unable to insert data into DynamoDB table".format(e))
+            with table.batch_writer() as batch:
+              for _,item in items.items():
+                batch.put_item(Item=json.loads(json.dumps(item), parse_float=Decimal))
+            return 'FINISHED!'
+      Runtime: python3.12
+      Timeout: 20
+
+  Lambda2Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lambda2
+      Handler: index.lambda_handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+      Code:
+        ZipFile: |
+          import boto3
+          from boto3.dynamodb.conditions import Key, Attr
+          from decimal import Decimal
+          import json
+
+          TABLE1_NAME = 'proy-Datos'
+          TABLE2_NAME = 'proy-Resultados'
+
+          dynamodb = boto3.resource('dynamodb')
+          table1 = dynamodb.Table(TABLE1_NAME)
+          table2 = dynamodb.Table(TABLE2_NAME)
+
+
+          def get_previous_month(date):
+              previous_month = date.split('-')
+              if previous_month[1] == '01':
+                  previous_month[0] = str(int(previous_month[0])-1)
+                  previous_month[1] = '12'
+                  
+              else:
+                  previous_month[1] = f'{(int(previous_month[1])-1):02}'
+
+              return '-'.join(previous_month)
+
+          def get_next_month(date):
+              next_month = date.split('-')
+              if next_month[1] == '12':
+                  next_month[0] = str(int(next_month[0])+1)
+                  next_month[1] = '01'
+                  
+              else:
+                  next_month[1] = f'{(int(next_month[1])+1):02}'
+
+              return '-'.join(next_month)
+
+
+          def get_items(current_date):
+              items = table1.query(KeyConditionExpression=Key('YearMonth').eq(current_date))['Items']
+              return items
+
+
+          def get_metrics(items, previous_month_items):
+              previous_month_avg = 0.0
+              if previous_month_items:
+                  for item in previous_month_items:
+                      if float(item['Medias']) > previous_month_avg:
+                          previous_month_avg = float(item['Medias'])
+              
+              medias = [float(items[i]['Medias']) for i in range(len(items))]
+              desviaciones = [float(items[i]['Desviaciones']) for i in range(len(items))]
+
+              max_sd = max(desviaciones)
+              media_mensual = sum(medias) / len(medias)
+
+              if previous_month_avg > 0:
+                  diff = max(medias) - previous_month_avg
+              else:
+                  diff = 0.0
+              
+              return {'YearMonth' : items[0]['YearMonth'],
+                      'maxdiff' : float(diff),
+                      'sd' : float(max_sd),
+                      'temp' :float(media_mensual)}
+
+
+
+          #Esto estaba pensado para procesar multiples modificaciones a la vez, pero para 1 tambien funciona correctamente
+          def lambda_handler(event, context):
+
+              inserted_or_modified = set()
+
+              for e in event['Records']:
+                  date = e['dynamodb']['Keys']['YearMonth']['S']
+                  inserted_or_modified.add(date)
+              
+              inserted_or_modified = list(inserted_or_modified)
+              new_rows = []
+              
+              for date in inserted_or_modified:
+                  items = get_items(date)
+                  previous_month_items = get_items(get_previous_month(date))
+                  row = get_metrics(items=items, previous_month_items=previous_month_items)
+                  new_rows.append(row)
+                  
+                  next_month_items = get_items(get_next_month(date))
+                  if next_month_items:
+                      next_month_row = get_metrics(items=next_month_items, previous_month_items=items)
+                      new_rows.append(next_month_row)
+              
+              for row in new_rows:
+                  table2.put_item(Item= json.loads(json.dumps(row), parse_float=Decimal))
+
+              return 'FINISHED!'
+      Runtime: python3.12
+      Timeout: 20
+
+  Lambda3Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lambda3
+      Handler: index.lambda_handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/LabRole
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          def lambda_handler(event, context):
+              message = None
+              fechas = []
+              desviaciones = []
+              for record in event['Records']:
+                  newImage = record['dynamodb'].get('NewImage', None)
+                  if newImage:        #Desviaciones": {"N": "0.4037204384803772"}
+                      desviacion = float(record['dynamodb']['NewImage']['Desviaciones']['N'])
+                      if desviacion is not None and float(desviacion) > 0.5:
+                          fecha = record['dynamodb']['NewImage']['YearMonth']['S']
+                          dia = record['dynamodb']['NewImage']['Day']['S']
+                          fechas.append(f"{fecha}-{dia}")
+                          desviaciones.append(desviacion)
+              if fechas and desviaciones:
+                  sns = boto3.client('sns')
+                  alertTopic = 'DeviationExceeded'
+                  snsTopicArn = [t['TopicArn'] for t in sns.list_topics()['Topics'] if t['TopicArn'].lower().endswith(':' + alertTopic.lower())][0]
+                  message = "Deviation exceeded on the following dates:\n" + "\n".join([f"{fecha}: {desviacion:.3f}" for fecha, desviacion in zip(fechas, desviaciones)])
+                  sns.publish(
+                      TopicArn=snsTopicArn,
+                      Subject='Desviación Alta Detectada',
+                      Message=message,
+                      MessageStructure='raw'
+                  )
+              return 'Updated'
+      Runtime: python3.12
+      Timeout: 20
+
+  ## Getting Dynamo Tables as Triggers for lambda functions
+  Lambda2Trigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt DynamoDBTable1.StreamArn
+      FunctionName: !Ref Lambda2Function
+      Enabled: 'True'
+      StartingPosition: TRIM_HORIZON
+      BatchSize: 100
+
+  Lambda3Trigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt DynamoDBTable1.StreamArn
+      FunctionName: !Ref Lambda3Function
+      Enabled: 'True'
+      StartingPosition: TRIM_HORIZON # Comienza a procesar los eventos desde el primer evento disponible en el stream, es decir, desde el comienzo del stream (más antiguos).
+      BatchSize: 100
+      #Menor BatchSize: Si se establece un BatchSize menor, la función Lambda se invocará más veces, procesando menos eventos por invocación. 
+      #Pero es preferible tener cuantas mas fechas agrupadas en un solo correo, paraa evitar mandar correos excesivos
+
+Outputs:
+  Message:
+    Description: Enlazar el bucket con una función Lambda
+    Value: !Sub El bucket S3 '${S3Bucket}' debe establecerse como trigger de la
+      función Lambda '${Lambda1Function}' para procesar los datos.
+    
+    #No puedes referenciar un único trigger de DynamoDB Streams directamente a dos funciones Lambda al mismo tiempo en CloudFormation.
+    #Cada evento de DynamoDB Streams debe estar asociado con una única función Lambda. Esto se debe a que el recurso AWS::Lambda::EventSourceMapping establece una relación uno a uno entre un stream y una función Lambda.
+
+
