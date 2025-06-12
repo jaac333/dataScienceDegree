@@ -1,0 +1,3 @@
+Proyecto de la asignatura de Procesamiento del Lenguaje Natural, impartida por el profesor Rafa Valencia. En este proyecto seleccioné varios subreddits de la red social Reddit, para obtener 20 hilos de cada subreddit, y 
+50 comentarios de cada hilo de subreddit. Así obtuve un buen corpus de comentarios de la red social a partir del cual llevé a cabo distintas técnicas de Procesamiento del Lenguaje, como clasificación de los comentarios
+según su subreddit de pertenencia mediante un modelo destilado de RoBERTa al que apliqué fine-tunning. También llevo a cabo resúmenes abstractivos con modelos preentrenados de Hugginface como Gemma 2B.
