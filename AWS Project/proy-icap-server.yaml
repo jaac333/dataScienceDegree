@@ -1,0 +1,525 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >- 
+  Server Template: A template that creates the server infrastructure for the proyect:
+
+# This template creates:
+#   1 Amazon ECR::Repository (where the image of the container of the task will be stored)
+#   1 Amazon EC2::Instance (proy-DockerServer, which creates the image and registers it in the repository. The installation is done in userdata rather than metadata because of the former simplicity)
+#   3 Amazon EC2::SecurityGroup(s) (for proy-DockerServer, the ALB, and the ECS Clúster)
+#   1 Amazon ECS::Cluster (the cluster which will contain the EC2 instances which will be running the tasks)
+#   1 Amazon AutoScaling::AutoScalingGroup (This launches the instances that will register themselves as members of the cluster, and run the docker containers)
+#   1 Amazon EC2::LaunchTemplate (Container Instances) (a template with the basic configuration of the instances in the cluster)
+#   1 Amazon ECS::CapacityProvider (to attach the ASG to the ECS cluster so that it autoscales as we launch more containers)
+#   1 Amazon ECS::ClusterCapacityProviderAssociations (so that the cluster will use the capacity provider)
+#   1 Amazon ECS::TaskDefinition (to execute the container created by proy-DockerServer)
+#   1 Amazon ElasticLoadBalancingV2::LoadBalancer (Aplication LB to redirect traffic to the instances of the cluster)
+#   1 Amazon ElasticLoadBalancingV2::TargetGroup (The ip target group for the ALB)
+#   1 Amazon ElasticLoadBalancingV2::Listener (The HTTP listener for the ALB)
+#   1 Amazon ECS::Service (to link all the components and allow the ALB and the cluster "talk" to each other)
+#   1 Amazon ScalableTarget (for the system to know when to scale up/down and stablish the upper/lower limits)
+#   1 Amazon ScalingPolicy (the settings for the auto-scaling)
+
+######################
+# Parameters section
+######################
+
+Parameters:
+  NetworkStackName:
+    Description: >-
+      Name of an active CloudFormation stack that contains the networking
+      resources, such as the VPC and subnet that will be used in this stack.
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: '^[a-zA-Z][-a-zA-Z0-9]*$'
+    Default: proy-network
+
+  ECSAMI:
+    Description: The Amazon Machine Image ID used for the cluster
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
+
+
+
+######################
+# Resources section
+######################
+
+Resources:
+
+  ## Repository.
+
+  Repository:
+    Type: AWS::ECR::Repository
+    
+    Properties:
+      EmptyOnDelete: True
+      RepositoryName: proy-repo
+
+
+  ## proy-DockerServer.
+
+  DockerInstance:
+    Type: AWS::EC2::Instance
+   
+    Properties:
+      InstanceType: t2.micro
+      ImageId: ami-08a0d1e16fc3f61ea
+      IamInstanceProfile: LabInstanceProfile
+      NetworkInterfaces:
+        - GroupSet:
+            - !Ref FlaskSecurityGroup
+          AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          DeleteOnTermination: true
+          SubnetId:
+            Fn::ImportValue:
+              !Sub ${NetworkStackName}-PublicSubnet1ID
+      Tags:
+        - Key: Name
+          Value: proy-DockerServer
+      UserData:
+        Fn::Base64: !Sub | 
+          #!/bin/bash
+          dnf update -y
+          #install Docker
+          dnf -y install docker
+
+          #create a directory to store docker files
+          mkdir -p /home/ec2-user/flask_docker
+
+          #create 3 files in the previously created directory
+          cat > /home/ec2-user/flask_docker/application.py<< EOF
+          from flask import Flask, request, jsonify, redirect, url_for
+          import boto3
+          from boto3.dynamodb.conditions import Key
+          from ec2_metadata import ec2_metadata
+          import os
+
+          TABLE = 'proy-Resultados'
+
+          db = boto3.resource('dynamodb', region_name='us-east-1')
+          table = db.Table(TABLE)
+
+          ipv4 = ec2_metadata.private_ipv4
+
+          app = Flask(__name__)
+
+
+          @app.route('/')
+          def index():
+              title = '<h1> You look kinda lost... But there you go a poem! </h1>'
+              content = '<h2> Cuando el mar sea redondo</h2>' + '<h2>y el sol deje de brillar,</h2>' + '<h2>ese será el día</h2>' + '<h2>en que te pueda olvidar. </h2>'
+              server = '<h3>Sincerely, with love,</h3>' + f'<h3>{ipv4}</h3>'
+
+              return title + content + server
+
+
+          @app.route('/maxdiff', methods=['GET'])
+          def maxdiff():
+              month = request.args['month']
+              month = f'{int(month):02}'
+              year = request.args['year']
+              date = '-'.join([year,month])
+              item = table.query(KeyConditionExpression=Key('YearMonth').eq(date))['Items'][0]
+
+              result = {}
+              if item:
+                  maxdiff = item['maxdiff']
+                  result['Date'] = date
+                  result['Maxdiff'] = maxdiff
+                  result['ip'] = ipv4
+                  result = jsonify(result)
+              else:
+                  result = '<h1>We currently do not have data of the requested date :(...</h1>'
+
+              return result
+
+
+          @app.route('/sd')
+          def sd():
+              month = request.args['month']
+              month = f'{int(month):02}'
+              year = request.args['year']
+              date = '-'.join([year,month])
+              item = table.query(KeyConditionExpression=Key('YearMonth').eq(date))['Items'][0]
+
+              result = {}
+              if item:
+                  sd = item['sd']
+                  result['Date'] = date
+                  result['sd'] = sd
+                  result['ip'] = ipv4
+                  result = jsonify(result)
+              else:
+                  result = '<h1>We currently do not have data of the requested date :(...</h1>'
+
+              return result
+
+
+          @app.route('/temp')
+          def temp():
+              month = request.args['month']
+              month = f'{int(month):02}'
+              year = request.args['year']
+              date = '-'.join([year,month])
+              item = table.query(KeyConditionExpression=Key('YearMonth').eq(date))['Items'][0]
+
+              result = {}
+              if item:
+                  temp = item['temp']
+                  result['Date'] = date
+                  result['temp'] = temp
+                  result['ip'] = ipv4
+                  result = jsonify(result)
+              else:
+                  result = '<h1>We currently do not have data of the requested date :(...</h1>'
+
+              return result
+
+
+          @app.errorhandler(Exception)
+          def handle_unexpected_error(error):
+              return redirect(url_for('index')) 
+
+
+          if __name__ == '__main__':
+              port = int(os.environ.get('PORT', 5000))
+              app.run(debug=True, host='0.0.0.0', port=port)
+          EOF
+
+          cat > /home/ec2-user/flask_docker/requirements.txt<< EOF
+          Flask==3.1.0
+          Werkzeug==3.1.3
+          Jinja2==3.1.4
+          MarkupSafe==2.1.5
+          itsdangerous==2.2.0
+          click==8.1.7
+          boto3==1.35.71
+          botocore==1.35.71
+          jmespath==1.0.1
+          s3transfer==0.10.4
+          ec2_metadata==2.14.0
+          requests==2.32.3
+          EOF
+
+          cat > /home/ec2-user/flask_docker/Dockerfile<< EOF
+          # syntax=docker/dockerfile:1.4
+          FROM python:3.9-alpine
+          WORKDIR /app
+          COPY requirements.txt requirements.txt
+          RUN pip3 install -r requirements.txt
+          COPY . .
+          CMD [ "python3", "application.py" ]
+          EOF
+
+          #change cwd to the previously created directory
+          cd /home/ec2-user/flask_docker
+
+          #start docker
+          sudo systemctl start docker
+
+          #build the container
+          sudo docker build -t flask_container .
+          
+          ACCID=$(aws sts get-caller-identity --query Account --output text)
+
+          sudo aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin "$ACCID".dkr.ecr.us-east-1.amazonaws.com
+          sudo docker tag flask_container "$ACCID".dkr.ecr.us-east-1.amazonaws.com/proy-repo:flask_container
+          sudo docker push "$ACCID".dkr.ecr.us-east-1.amazonaws.com/proy-repo:flask_container
+
+
+  ## The Security Group of proy-DockerServer.
+
+  FlaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable TCP ingress for Flask
+      VpcId:
+        Fn::ImportValue:
+          !Sub ${NetworkStackName}-VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: proy-Flask Security Group
+  
+
+  ## The security group of the Aplication Load Balancer.
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable TCP ingress for Flask
+      VpcId:
+        Fn::ImportValue:
+          !Sub ${NetworkStackName}-VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: proy-ALB-Security-Group
+
+
+  ## The security group of the cluster.
+
+  PrivateFlaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: ALBSecurityGroup
+    Properties:
+      GroupDescription: Enable traffic from ALB SG
+      VpcId:
+        Fn::ImportValue:
+          !Sub ${NetworkStackName}-VPCID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: proy-Private-Cluster-Security-Group
+  
+
+  ## ECS cluster.
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: proy-ecs-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+  
+
+  # Auto Scaling group.
+
+  ECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      # This is to ensure that the ASG gets deleted first before these
+      # resources, when it comes to stack teardown.
+      - ECSCluster
+    Properties:
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
+        - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
+        
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ContainerInstances
+        Version: !GetAtt ContainerInstances.LatestVersionNumber
+      MinSize: 4
+      MaxSize: 6
+      NewInstancesProtectedFromScaleIn: true
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: "true"
+  
+
+  # Launch Template.
+
+  ContainerInstances:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: "asg-launch-template"
+      LaunchTemplateData:
+        ImageId:
+          Ref: ECSAMI
+        InstanceType: t2.micro
+        IamInstanceProfile: 
+          Arn: !Sub arn:aws:iam::${AWS::AccountId}:instance-profile/LabInstanceProfile 
+        SecurityGroupIds:
+          - !Ref PrivateFlaskSecurityGroup
+        # This injected configuration file is how the EC2 instance
+        # knows which ECS cluster on your AWS account it should be joining
+        UserData:
+          Fn::Base64: !Sub |
+           #!/bin/bash -xe
+            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+            yum install -y aws-cfn-bootstrap
+            /opt/aws/bin/cfn-init -v --stack ${AWS::StackId} --resource ContainerInstances --configsets full_install --region ${AWS::Region} &
+        # Disable IMDSv1, and require IMDSv2
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+  
+
+  # Capacity Provider.
+
+  CapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref ECSAutoScalingGroup
+        ManagedScaling:
+          InstanceWarmupPeriod: 60
+          MinimumScalingStepSize: 1
+          MaximumScalingStepSize: 4
+          Status: ENABLED
+          # Percentage of cluster reservation to try to maintain
+          TargetCapacity: 100
+        ManagedTerminationProtection: ENABLED
+  
+
+  # Cluster Capacity Provider Associations.
+
+  CapacityProviderAssociation:
+    Type: AWS::ECS::ClusterCapacityProviderAssociations
+    Properties:
+      CapacityProviders:
+        - !Ref CapacityProvider
+      Cluster: !Ref ECSCluster
+      DefaultCapacityProviderStrategy:
+        - Base: 0
+          CapacityProvider: !Ref CapacityProvider
+          Weight: 1
+
+
+  # Task Definition.
+
+  TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: proy-task
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: awsvpc
+      Cpu: .25 vCPU
+      Memory: 0.5 GB
+      TaskRoleArn: LabRole
+      ExecutionRoleArn: LabRole
+      ContainerDefinitions:
+        - Name: proy-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/proy-repo:flask_container
+          Cpu: 256
+          PortMappings:
+            - ContainerPort: 5000
+              Protocol: tcp
+              Name: flasktraffic
+              AppProtocol: http
+
+
+  ## (Application) Load Balancer.
+  
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: flask-load-balancer
+      IpAddressType: ipv4
+      SecurityGroups: 
+        - !Ref ALBSecurityGroup
+      Subnets: 
+        - Fn::ImportValue: !Sub ${NetworkStackName}-PublicSubnet1ID
+        - Fn::ImportValue: !Sub ${NetworkStackName}-PublicSubnet2ID
+  
+
+  ## (IP) Target Group.
+
+  IPTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: ip
+      Name: ip-target-group
+      Protocol: HTTP
+      Port: 5000
+      VpcId: 
+        Fn::ImportValue:
+          !Sub ${NetworkStackName}-VPCID
+      HealthyThresholdCount: 2
+      HealthCheckIntervalSeconds: 6
+
+
+  ## (HTTP) Listener.
+
+  HTTPListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref IPTargetGroup
+      LoadBalancerArn: !Ref ALB
+      Port: 5000
+      Protocol: "HTTP"
+  
+
+  ## ECS Service.
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: 
+      - HTTPListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: proy-ecs-service
+      SchedulingStrategy: REPLICA
+      DesiredCount: 4
+      AvailabilityZoneRebalancing: ENABLED
+      LoadBalancers: 
+        - ContainerName: proy-container
+          ContainerPort: 5000
+          TargetGroupArn: !Ref IPTargetGroup
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+            SecurityGroups: 
+              - !Ref PrivateFlaskSecurityGroup
+            Subnets: 
+              - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet1ID
+              - Fn::ImportValue: !Sub ${NetworkStackName}-PrivateSubnet2ID
+      TaskDefinition: !Ref TaskDefinition
+  
+
+  ## Scalable Target.
+
+  ECSScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: 
+      - ECSService
+    Properties:
+      MaxCapacity: 6
+      MinCapacity: 4
+      ServiceNamespace: ecs
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ResourceId: 'service/proy-ecs-cluster/proy-ecs-service'
+  
+
+  ## Scaling Policy.
+  
+  ServiceScalingPolicyALB:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ALB-ECS-Policy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 1000
+        ScaleInCooldown: 180
+        ScaleOutCooldown: 30
+        DisableScaleIn: true 
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Join
+            - '/'
+            - - !GetAtt ALB.LoadBalancerFullName
+              - !GetAtt IPTargetGroup.TargetGroupFullName
+
+
+
+Outputs:
+  ClusterName:
+    Description: The ECS cluster into which to launch resources
+    Value: ECSCluster
+
+  CapacityProvider:
+    Description: The cluster capacity provider that the service should use to
+      request capacity when it wants to start up a task
+    Value: CapacityProvider
+  
+  ECSTaskDefinition:
+    Description: The created Taskdefinition.
+    Value: !Ref TaskDefinition
