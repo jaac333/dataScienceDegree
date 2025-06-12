@@ -1,0 +1,66 @@
+{
+  "mT5_multilingual_XLSum": {
+    "1gz88wb": {
+      "Resumen": "When I bought a quarter wheel of parmeggiano reggiano for $11 because it was mis-labeled, I was shocked."
+    },
+    "1e1m9bf": {
+      "Resumen": "In our series of letters from African journalists, Joseph Warungu explains what makes food in the US so bad."
+    },
+    "ewwmem": {
+      "Resumen": "This is a full transcript of the coronavirus outbreak which has killed more than 100 people in China."
+    },
+    "dt0ucg": {
+      "Resumen": "James Harden's box score declines in cities with high quality strip clubs, according to a new study."
+    },
+    "df1g3g": {
+      "Resumen": "A pro esports player has been banned from entering the FIFA World Cup in Hong Kong."
+    },
+    "tgpbvv": {
+      "Resumen": "This is the best soup I’ve ever had."
+    },
+    "7trnof": {
+      "Resumen": "This is a full transcript of ancient Egyptian history."
+    },
+    "3by2nk": {
+      "Resumen": "Reddit has closed a number of its subReddits, which have been affected by civil disobedience."
+    },
+    "gv708p": {
+      "Resumen": "This is a full transcript of how I eats the ugly pieces at meals."
+    },
+    "7k296s": {
+      "Resumen": "Why do airplanes need to fly so high?"
+    }
+  },
+  "gemma_2B": {
+    "1gz88wb": {
+      "Resumen": "The Reddit thread discusses an absurd deal on a 23-pound box of parmesan reggiano cheese for only $11. The thread advises against trying to purchase it at that price, as the seller intentionally mislabeled it. The thread provides recipes that are appropriate for a cheese board, including Cacio Pepe and Pasta Carbonara."
+    },
+    "1e1m9bf": {
+      "Resumen": "Sure, here's the summary you requested:\n\nThe thread discusses the perceived poor quality of food in the United States, with people experiencing weight loss while traveling to Europe. They believe that the processing and food quality of the US are not as good as those in other countries, leading to health problems."
+    },
+    "ewwmem": {
+      "Resumen": "Sure, here's the summary you requested:\n\nThe 2019 novel coronavirus (2019-nCoV) is a global health emergency with a significant presence in Hubei Province, China. The virus's origin and spread are still under investigation, with some questioning a potential link to biological weapons development in China."
+    },
+    "dt0ucg": {
+      "Resumen": "Sure, here's the summary:\n\nJames Harden's box score is negatively correlated with the city's average strip club rating. This correlation suggests that cities with better strip club ratings have better performance from James Harden."
+    },
+    "df1g3g": {
+      "Resumen": "Sure, here is the summary you requested:\n\nBlizzard has banned a pro esports player for supporting Hong Kong protesters and confiscating his prize money. The player was contracted not to use the streaming platform and event for other purposes, and he broke that agreement by supporting the protesters. The penalty is severe, and social media pressure is expected to make the company ease up its stance."
+    },
+    "tgpbvv": {
+      "Resumen": "Sure, here is the summary:\n\nThe thread discusses the use of salt in cooking and the opinions of the mother and her uncle. The mother is skeptical of using salt, but her uncle enjoys a soup that her mother cooks that he claims is the best he's ever had."
+    },
+    "7trnof": {
+      "Resumen": "Sure, here is the summary you requested:\n\nAncient languages like Egyptian, Mayan, Greek, and Latin have always been challenging to decipher due to anglicism and the absence of definitive written records. However, advancements in linguistic research have shed light on these ancient languages, with the use of evidence such as inscriptions, hieroglyphics, and historical comparisons. While the pronunciation of these languages is often uncertain, scholars have been able to reconstruct approximate sounds and meanings through linguistic analysis and comparative studies."
+    },
+    "3by2nk": {
+      "Resumen": "Sure, here's the summary:\n\nThe thread highlights the issue of inadequate communication between Reddit and the subreddit admins, which has led to a loss of trust and a sense of neglect from the admins. It expresses the desire for transparency and responsibility from Reddit, considering the recent closure of several subreddits and the lack of attention given to the matter by the subreddit admins."
+    },
+    "gv708p": {
+      "Resumen": "Sure, here is the summary:\n\nThe thread discusses whether or not it's acceptable for the primary cook to eat the ugly pieces of food at meals. While the thread has several replies, the overall sentiment is positive, with many people acknowledging that they enjoy eating the ugly pieces of food."
+    },
+    "7k296s": {
+      "Resumen": "Sure, here is the summary:\n\nAirplanes need to fly so high because higher altitudes have thinner atmospheres, cooler temperatures, and sometimes as a bonus higher tailwinds. These factors contribute to improved engine efficiency and fuel efficiency."
+    }
+  }
+}
